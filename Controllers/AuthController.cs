@@ -1,6 +1,7 @@
 using System.Net.Mime;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Configuration;
 using OAuthTest.Models;
 using OAuthTest.Services;
 
@@ -11,14 +12,13 @@ namespace OAuthTest.Controllers;
 [Produces(MediaTypeNames.Application.Json)]
 public sealed class AuthController : ControllerBase
 {
-    private const string DemoUserId = "user-1";
-    private const string DemoUsername = "demo";
-    private const string DemoPassword = "P@ssw0rd!";
-
     private readonly ITokenService _tokenService;
     private readonly IRefreshTokenStore _refreshTokenStore;
+    private static readonly Lazy<DemoUserConfig> DemoUser = new(LoadDemoUser);
 
-    public AuthController(ITokenService tokenService, IRefreshTokenStore refreshTokenStore)
+    public AuthController(
+        ITokenService tokenService,
+        IRefreshTokenStore refreshTokenStore)
     {
         _tokenService = tokenService;
         _refreshTokenStore = refreshTokenStore;
@@ -33,7 +33,7 @@ public sealed class AuthController : ControllerBase
             return Unauthorized();
         }
 
-        var tokens = _tokenService.CreateTokens(DemoUserId, DemoUsername);
+        var tokens = _tokenService.CreateTokens(DemoUser.Value.UserId, DemoUser.Value.Username);
         return Ok(tokens);
     }
 
@@ -57,12 +57,12 @@ public sealed class AuthController : ControllerBase
             return Unauthorized();
         }
 
-        if (userId != DemoUserId)
+        if (userId != DemoUser.Value.UserId)
         {
             return Unauthorized();
         }
 
-        var tokens = _tokenService.CreateTokens(DemoUserId, DemoUsername);
+        var tokens = _tokenService.CreateTokens(DemoUser.Value.UserId, DemoUser.Value.Username);
         return Ok(tokens);
     }
 
@@ -70,10 +70,37 @@ public sealed class AuthController : ControllerBase
     [Authorize]
     public IActionResult Logout()
     {
-        _refreshTokenStore.RevokeAllForUser(DemoUserId);
+        _refreshTokenStore.RevokeAllForUser(DemoUser.Value.UserId);
         return NoContent();
     }
 
-    private static bool IsValidUser(string username, string password) =>
-        username == DemoUsername && password == DemoPassword;
+    private bool IsValidUser(string username, string password) =>
+        username == DemoUser.Value.Username && password == DemoUser.Value.Password;
+
+    private static DemoUserConfig LoadDemoUser()
+    {
+        var environment = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
+        var builder = new ConfigurationBuilder()
+            .SetBasePath(AppContext.BaseDirectory)
+            .AddJsonFile("appsettings.json", optional: false, reloadOnChange: false)
+            .AddJsonFile($"appsettings.{environment}.json", optional: true, reloadOnChange: false)
+            .AddEnvironmentVariables();
+
+        var config = builder.Build();
+        var section = config.GetSection("DemoUser");
+
+        return new DemoUserConfig
+        {
+            UserId = section["UserId"] ?? "",
+            Username = section["Username"] ?? "",
+            Password = section["Password"] ?? ""
+        };
+    }
+
+    private sealed class DemoUserConfig
+    {
+        public string UserId { get; init; } = "";
+        public string Username { get; init; } = "";
+        public string Password { get; init; } = "";
+    }
 }
